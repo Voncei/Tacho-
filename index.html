@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS Racing Tracker</title>
+    <!-- Tailwind CSS (für schnelles, responsives Styling) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS (für die Karte) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <!-- Icons (Lucide Icons für React/Angular, FontAwesome hier) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" xintegrity="sha512-SnH5WK+bZxgPHs44uWIX+LLMDJzL3m3yX+86pE/0yA7+6l/v8B/Wz7S6G/8UaF5/C9l5fR07lY0/K+0S5e5w==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        /* Allgemeine Styles für ein Racing-Feeling */
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Dunkler Hintergrund */
+            color: #f3f4f6;
+        }
+
+        /* Custom Styles für das Racing-Cockpit */
+        .dashboard-unit {
+            font-family: 'Orbitron', sans-serif; /* Futuristischer Font */
+            text-shadow: 0 0 5px rgba(239, 68, 68, 0.7); /* Roter Glow */
+        }
+
+        /* Custom Tacho Styling (Digital) */
+        #speedDisplay {
+            min-height: 100px;
+            font-size: 3.5rem; /* Große, auffällige Geschwindigkeit */
+            line-height: 1;
+            transition: all 0.3s ease-out; /* Flüssiger Übergang bei Geschwindigkeitsänderungen */
+        }
+
+        /* Map Styling */
+        #map {
+            height: 40vh; /* Responsive Kartenhöhe */
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Smooth UI Transitions */
+        .smooth-transition {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Custom Marker Animation (CSS-Keyframes für den Marker-Puls) */
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        .racing-marker-dot {
+            width: 14px;
+            height: 14px;
+            background-color: #ef4444; /* Rot */
+            border-radius: 50%;
+            border: 2px solid #fecaca;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Custom Scrollbar für Routenliste */
+        #routesList {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        #routesList::-webkit-scrollbar {
+            width: 8px;
+        }
+        #routesList::-webkit-scrollbar-thumb {
+            background-color: #ef4444;
+            border-radius: 10px;
+        }
+        #routesList::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-6 md:p-8">
+
+    <div id="mainApp" class="max-w-4xl mx-auto space-y-6">
+
+        <!-- Header und Statusmeldung -->
+        <h1 class="text-3xl font-extrabold text-center text-red-500 tracking-wider dashboard-unit">
+            RACING GPS COCKPIT
+        </h1>
+        <div id="statusMessage" class="text-center p-2 text-sm font-medium rounded-lg smooth-transition" role="alert">
+            <span class="flex items-center justify-center space-x-2">
+                <i class="fas fa-satellite-dish"></i>
+                <span id="gpsStatusText">Warte auf GPS-Signal...</span>
+            </span>
+        </div>
+
+        <!-- Dashboard / Cockpit (Speed, Time, Altitude) -->
+        <div class="bg-gray-800 p-4 rounded-xl shadow-2xl smooth-transition">
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <!-- SPEED TACHO -->
+                <div class="col-span-1 border-r border-gray-700">
+                    <div class="text-xs text-red-400 font-semibold uppercase tracking-wider">Geschw. (km/h)</div>
+                    <div id="speedDisplay" class="dashboard-unit text-red-500 font-bold mt-1">0</div>
+                </div>
+
+                <!-- TIMER -->
+                <div class="col-span-1 border-r border-gray-700">
+                    <div class="text-xs text-gray-400 font-semibold uppercase tracking-wider">Timer (H:M:S)</div>
+                    <div id="timerDisplay" class="dashboard-unit text-green-400 font-bold text-2xl mt-3">00:00:00</div>
+                </div>
+
+                <!-- ALTITUDE -->
+                <div class="col-span-1">
+                    <div class="text-xs text-gray-400 font-semibold uppercase tracking-wider">Höhe (m ü. NN)</div>
+                    <div class="dashboard-unit text-blue-400 font-bold text-2xl mt-3">
+                        <span id="altitudeDisplay">0</span> m
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map Section -->
+        <div id="map" class="smooth-transition"></div>
+
+        <!-- Kontroll-Buttons -->
+        <div class="flex flex-wrap justify-center gap-4 p-4 bg-gray-900 rounded-xl shadow-2xl">
+            <button id="startButton" class="smooth-transition px-6 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 focus:outline-none focus:ring-4 focus:ring-red-500 focus:ring-opacity-50 flex items-center gap-2" onclick="startTracking()">
+                <i class="fas fa-play"></i>
+                <span>Start Aufzeichnung</span>
+            </button>
+            <button id="stopButton" disabled class="smooth-transition px-6 py-3 bg-gray-600 text-white font-bold rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-500 focus:ring-opacity-50 flex items-center gap-2" onclick="stopTracking()">
+                <i class="fas fa-stop"></i>
+                <span>Stop & Speichern</span>
+            </button>
+            <button id="showRoutesButton" class="smooth-transition px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 flex items-center gap-2" onclick="toggleRouteManager()">
+                <i class="fas fa-route"></i>
+                <span>Routen Manager</span>
+            </button>
+        </div>
+
+        <!-- Routenverwaltung Screen (Modal-ähnlich) -->
+        <div id="routeManager" class="smooth-transition hidden p-6 bg-gray-800 rounded-xl shadow-2xl space-y-4">
+            <h2 class="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+                <i class="fas fa-folder-open text-indigo-400"></i>
+                Routenverwaltung
+            </h2>
+
+            <!-- Routen suchen -->
+            <div>
+                <label for="routeSearch" class="block text-sm font-medium text-gray-400 mb-2">Gespeicherte Routen suchen</label>
+                <div class="relative">
+                    <input type="text" id="routeSearch" oninput="searchRoutes()" placeholder="Routenname eingeben..." class="w-full px-4 py-2 pr-10 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500">
+                    <i class="fas fa-search absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                </div>
+            </div>
+
+            <!-- Routenliste -->
+            <div id="routesList" class="space-y-2 p-2 bg-gray-900 rounded-lg border border-gray-700">
+                <p id="loadingRoutes" class="text-center text-gray-400">Lade Routen...</p>
+                <!-- Routen werden hier dynamisch eingefügt -->
+            </div>
+
+            <!-- Modal für Route Starten (Aktivieren einer gespeicherten Route) -->
+            <button id="startRouteButton" class="w-full px-4 py-2 mt-4 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50" onclick="startSelectedRoute()">
+                <i class="fas fa-flag-checkered"></i>
+                Gespeicherte Route starten
+            </button>
+        </div>
+
+        <!-- Save Route Modal (Custom Dialog) -->
+        <div id="saveModal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center p-4 z-50">
+            <div class="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-sm space-y-4 smooth-transition transform scale-95 opacity-0">
+                <h3 class="text-xl font-bold text-red-400">Route speichern</h3>
+                <p class="text-gray-300">Geben Sie Ihrer Route einen Namen:</p>
+                <input type="text" id="routeNameInput" placeholder="Z.B. 'Meine Hausrunde'" class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-red-500 focus:border-red-500">
+                <div class="flex justify-end gap-2">
+                    <button class="px-4 py-2 text-sm bg-gray-600 rounded-lg hover:bg-gray-700" onclick="hideSaveModal()">Abbrechen</button>
+                    <button class="px-4 py-2 text-sm bg-red-600 rounded-lg hover:bg-red-700" onclick="saveRouteConfirmed()">Speichern</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alert/Confirm Modal (Custom Dialog) -->
+        <div id="alertModal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center p-4 z-50">
+            <div id="alertContent" class="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-sm space-y-4 smooth-transition transform scale-95 opacity-0">
+                <h3 id="alertTitle" class="text-xl font-bold text-red-400">Aktion</h3>
+                <p id="alertMessage" class="text-gray-300"></p>
+                <div class="flex justify-end gap-2">
+                    <button id="alertConfirmButton" class="px-4 py-2 text-sm bg-red-600 rounded-lg hover:bg-red-700 hidden" onclick="confirmAction()">Bestätigen</button>
+                    <button class="px-4 py-2 text-sm bg-gray-600 rounded-lg hover:bg-gray-700" onclick="hideAlertModal()">Schließen</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, setDoc, onSnapshot, collection, query, where, getDocs, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Deaktivieren Sie Warnungen zur besseren Übersicht
+        setLogLevel('error');
+
+        // Globale Variablen aus der Canvas-Umgebung
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, auth, db, userId;
+        let map;
+        let currentMarker;
+        let routePolyline;
+        let watchId = null;
+        let timerInterval = null;
+        let startTime = 0;
+        let isRecording = false;
+        let currentRoute = [];
+        let allRoutes = [];
+        let selectedRouteId = null; // ID der Route, die gestartet werden soll
+
+        // Exposed functions to the global scope
+        window.startTracking = startTracking;
+        window.stopTracking = stopTracking;
+        window.toggleRouteManager = toggleRouteManager;
+        window.hideSaveModal = hideSaveModal;
+        window.saveRouteConfirmed = saveRouteConfirmed;
+        window.searchRoutes = searchRoutes;
+        window.loadRoute = loadRoute;
+        window.startSelectedRoute = startSelectedRoute;
+        window.hideAlertModal = hideAlertModal;
+
+        /**
+         * INITIALISIERUNG
+         */
+        const initFirebase = async () => {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    throw new Error("Firebase Konfiguration fehlt.");
+                }
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Authentifizierung
+                await new Promise((resolve, reject) => {
+                    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+                        unsubscribe(); // Nur einmal ausführen
+                        if (user) {
+                            userId = user.uid;
+                            console.log("Firebase Auth erfolgreich (UID):", userId);
+                            resolve();
+                        } else if (initialAuthToken) {
+                            try {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } catch (error) {
+                                console.error("Fehler bei Custom Token Sign-in:", error);
+                                await signInAnonymously(auth); // Fallback
+                            }
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    }, reject);
+                });
+
+                userId = auth.currentUser.uid;
+                initMap(); // Karte nach Auth initialisieren
+                setupRouteListener(); // Routen-Listener nach Auth starten
+
+            } catch (error) {
+                console.error("Firebase Initialisierungsfehler:", error.message);
+                updateStatus('Fehler: Firebase-Dienste nicht verfügbar.', 'bg-red-500');
+            }
+        };
+
+        /**
+         * KARTEN-FUNKTIONEN (Leaflet)
+         */
+        const initMap = () => {
+            // Standardposition: Berlin (Fallback)
+            const initialCoords = [52.5200, 13.4050];
+
+            map = L.map('map', {
+                zoomControl: false, // Zoom-Steuerung ausblenden
+                attributionControl: false // Attribution ausblenden
+            }).setView(initialCoords, 13);
+
+            // OpenStreetMap Tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                // Minimales Attributions-Element hinzufügen, falls AttributionControl false ist
+                attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OSM</a>'
+            }).addTo(map);
+
+            // Custom Marker Icon (Roter Dot mit Puls-Animation)
+            const racingIcon = L.divIcon({
+                className: 'custom-racing-icon',
+                html: '<div class="racing-marker-dot"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+
+            currentMarker = L.marker(initialCoords, { icon: racingIcon }).addTo(map);
+
+            // Polyline für die aktuelle Route
+            routePolyline = L.polyline([], { color: '#ef4444', weight: 5, opacity: 0.8 }).addTo(map);
+        };
+
+        let lastPosition = null;
+
+        /**
+         * GPS-TRACKING FUNKTIONEN
+         */
+        const startTracking = () => {
+            if (isRecording) {
+                showAlert('Achtung', 'Die Aufzeichnung läuft bereits.', false);
+                return;
+            }
+
+            currentRoute = [];
+            routePolyline.setLatLngs([]); // Polyline zurücksetzen
+            startTime = Date.now();
+            isRecording = true;
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+            document.getElementById('startButton').classList.replace('bg-red-600', 'bg-gray-500');
+            document.getElementById('stopButton').classList.replace('bg-gray-600', 'bg-red-600');
+            updateStatus('Aufzeichnung läuft...', 'bg-green-600');
+            startTimer();
+
+            // Optionen für das Tracking
+            const options = {
+                enableHighAccuracy: true, // Hohe Genauigkeit
+                timeout: 5000,
+                maximumAge: 0
+            };
+
+            // Startet die Überwachung der Position
+            watchId = navigator.geolocation.watchPosition(
+                handlePositionUpdate,
+                handleError,
+                options
+            );
+        };
+
+        // Hilfsfunktion zur Interpolation für flüssige Bewegung
+        const interpolateMarker = (from, to) => {
+            const step = 0.05; // Kontrolliert die Geschwindigkeit der Animation (kleiner = langsamer/smoother)
+            let t = 0;
+
+            const animate = () => {
+                if (t >= 1) {
+                    currentMarker.setLatLng(to);
+                    return;
+                }
+                t += step;
+
+                // Lineare Interpolation zwischen der letzten und der neuen Position
+                const lat = from.lat + (to.lat - from.lat) * t;
+                const lng = from.lng + (to.lng - from.lng) * t;
+                const interpolatedLatLng = L.latLng(lat, lng);
+
+                currentMarker.setLatLng(interpolatedLatLng);
+                map.setView(interpolatedLatLng, map.getZoom(), { animate: true, duration: 0.1 }); // Map weich folgen lassen
+
+                requestAnimationFrame(animate);
+            };
+
+            requestAnimationFrame(animate);
+        };
+
+
+        const handlePositionUpdate = (pos) => {
+            const coords = pos.coords;
+            const newLat = coords.latitude;
+            const newLng = coords.longitude;
+            const newLatLng = L.latLng(newLat, newLng);
+
+            // GPS-Status anzeigen
+            updateStatus('Live-Tracking aktiv', 'bg-green-600');
+
+            // 1. Marker und Map-Update (mit Animation)
+            if (lastPosition) {
+                interpolateMarker(lastPosition, newLatLng);
+            } else {
+                currentMarker.setLatLng(newLatLng);
+                map.setView(newLatLng, 15); // Erster Zoom auf Position
+            }
+            lastPosition = newLatLng;
+
+            // 2. Dashboard-Updates
+            const speedMps = coords.speed !== null && coords.speed >= 0 ? coords.speed : 0;
+            const speedKmh = Math.round(speedMps * 3.6); // m/s zu km/h
+            const altitude = coords.altitude !== null ? Math.round(coords.altitude) : 0; // m ü. NN
+
+            document.getElementById('speedDisplay').textContent = speedKmh;
+            document.getElementById('altitudeDisplay').textContent = altitude;
+
+            // 3. Route Aufzeichnung
+            if (isRecording) {
+                // Nur speichern, wenn sich die Position signifikant geändert hat
+                const lastPoint = currentRoute[currentRoute.length - 1];
+                if (!lastPoint || L.latLng(lastPoint.lat, lastPoint.lng).distanceTo(newLatLng) > 5) { // 5 Meter Unterschied
+                    currentRoute.push({
+                        lat: newLat,
+                        lng: newLng,
+                        speed: speedKmh,
+                        alt: altitude,
+                        timestamp: Date.now()
+                    });
+                    // Polyline aktualisieren
+                    const latLngs = currentRoute.map(p => [p.lat, p.lng]);
+                    routePolyline.setLatLngs(latLngs);
+                }
+            }
+        };
+
+        const handleError = (error) => {
+            console.error('GPS-Fehler:', error);
+            let message = 'GPS-Fehler unbekannt.';
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    message = 'Zugriff auf Standort verweigert. Bitte erlauben Sie den GPS-Zugriff.';
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message = 'Standortinformationen nicht verfügbar.';
+                    break;
+                case error.TIMEOUT:
+                    message = 'Zeitüberschreitung beim Abrufen des Standorts.';
+                    break;
+            }
+            updateStatus(message, 'bg-red-500');
+        };
+
+        const stopTracking = () => {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            clearInterval(timerInterval);
+            isRecording = false;
+            document.getElementById('startButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+            document.getElementById('startButton').classList.replace('bg-gray-500', 'bg-red-600');
+            document.getElementById('stopButton').classList.replace('bg-red-600', 'bg-gray-600');
+            updateStatus('Aufzeichnung gestoppt. Bitte speichern.', 'bg-yellow-600');
+
+            // Zeige das Speichern-Modal
+            showSaveModal();
+        };
+
+        /**
+         * TIMER FUNKTIONEN
+         */
+        const startTimer = () => {
+            clearInterval(timerInterval);
+            timerInterval = setInterval(updateTimer, 1000);
+        };
+
+        const updateTimer = () => {
+            const elapsedTime = Date.now() - startTime;
+            const totalSeconds = Math.floor(elapsedTime / 1000);
+
+            const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+            const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+            const seconds = String(totalSeconds % 60).padStart(2, '0');
+
+            document.getElementById('timerDisplay').textContent = `${hours}:${minutes}:${seconds}`;
+        };
+
+        /**
+         * FIREBASE / ROUTENVERWALTUNG
+         */
+        const getRoutesCollection = () => {
+            // Pfad: /artifacts/{appId}/users/{userId}/gps_routes
+            return collection(db, 'artifacts', appId, 'users', userId, 'gps_routes');
+        };
+
+        const setupRouteListener = () => {
+            if (!db || !userId) return;
+
+            const q = query(getRoutesCollection());
+
+            // Listener für Echtzeit-Updates der Routenliste
+            onSnapshot(q, (snapshot) => {
+                allRoutes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderRoutes(allRoutes);
+                document.getElementById('loadingRoutes').classList.add('hidden');
+                console.log("Routen erfolgreich geladen:", allRoutes.length);
+            }, (error) => {
+                console.error("Fehler beim Abrufen der Routen:", error);
+                showAlert('Datenbank Fehler', 'Routen konnten nicht geladen werden.', false);
+            });
+        };
+
+        const saveRouteConfirmed = async () => {
+            const routeName = document.getElementById('routeNameInput').value.trim();
+
+            if (!routeName) {
+                showAlert('Ungültiger Name', 'Bitte geben Sie einen Namen für die Route ein.', false);
+                return;
+            }
+
+            if (currentRoute.length < 2) {
+                showAlert('Zu kurz', 'Route ist zu kurz, um gespeichert zu werden (mind. 2 Punkte).', false);
+                hideSaveModal();
+                // Setze UI zurück, ohne zu speichern
+                document.getElementById('timerDisplay').textContent = '00:00:00';
+                return;
+            }
+
+            hideSaveModal();
+            updateStatus('Route wird gespeichert...', 'bg-indigo-600');
+
+            try {
+                const routeData = {
+                    name: routeName,
+                    points: JSON.stringify(currentRoute), // Punkte als JSON-String speichern
+                    durationMs: Date.now() - startTime,
+                    timestamp: serverTimestamp(),
+                    pointsCount: currentRoute.length
+                };
+
+                await addDoc(getRoutesCollection(), routeData);
+                updateStatus(`Route "${routeName}" erfolgreich gespeichert!`, 'bg-green-600');
+
+            } catch (error) {
+                console.error("Fehler beim Speichern der Route:", error);
+                showAlert('Speicherfehler', `Route konnte nicht gespeichert werden: ${error.message}`, false);
+            }
+
+            // UI zurücksetzen
+            currentRoute = [];
+            routePolyline.setLatLngs([]);
+            document.getElementById('timerDisplay').textContent = '00:00:00';
+        };
+
+        const renderRoutes = (routes) => {
+            const list = document.getElementById('routesList');
+            list.innerHTML = ''; // Liste leeren
+
+            if (routes.length === 0) {
+                list.innerHTML = `<p class="text-center text-gray-500 p-2">Keine Routen gefunden.</p>`;
+                return;
+            }
+
+            routes.forEach(route => {
+                const durationSeconds = Math.floor(route.durationMs / 1000);
+                const hours = String(Math.floor(durationSeconds / 3600)).padStart(2, '0');
+                const minutes = String(Math.floor((durationSeconds % 3600) / 60)).padStart(2, '0');
+                const seconds = String(durationSeconds % 60).padStart(2, '0');
+                const durationFormatted = `${hours}:${minutes}:${seconds}`;
+
+                const routeItem = document.createElement('div');
+                routeItem.className = `p-3 flex items-center justify-between rounded-lg cursor-pointer smooth-transition border ${selectedRouteId === route.id ? 'bg-red-900 border-red-500' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'}`;
+                routeItem.innerHTML = `
+                    <div>
+                        <p class="font-semibold text-white">${route.name}</p>
+                        <p class="text-xs text-gray-400">Dauer: ${durationFormatted} | Punkte: ${route.pointsCount || 'N/A'}</p>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button class="text-indigo-400 hover:text-indigo-300 p-1" title="Route anzeigen" onclick="loadRoute('${route.id}')"><i class="fas fa-eye"></i></button>
+                        <button class="text-red-400 hover:text-red-300 p-1" title="Route löschen" onclick="deleteRoute('${route.id}', '${route.name}')"><i class="fas fa-trash"></i></button>
+                    </div>
+                `;
+                routeItem.onclick = () => {
+                    selectedRouteId = route.id;
+                    renderRoutes(allRoutes); // UI-Update
+                };
+
+                list.appendChild(routeItem);
+            });
+        };
+
+        window.loadRoute = (routeId) => {
+            const route = allRoutes.find(r => r.id === routeId);
+            if (!route) return;
+
+            // Route auswählen, ohne sie direkt zu starten
+            selectedRouteId = routeId;
+            renderRoutes(allRoutes);
+
+            try {
+                const points = JSON.parse(route.points);
+                if (points.length === 0) {
+                    showAlert('Fehler', 'Die Route enthält keine Punkte.', false);
+                    return;
+                }
+
+                // Polyline zeichnen
+                const latLngs = points.map(p => [p.lat, p.lng]);
+                routePolyline.setLatLngs(latLngs);
+                map.fitBounds(routePolyline.getBounds()); // Auf die Route zoomen
+
+                // Marker am Startpunkt platzieren
+                const startPoint = L.latLng(points[0].lat, points[0].lng);
+                currentMarker.setLatLng(startPoint);
+
+                showAlert('Route geladen', `Route "${route.name}" wurde auf der Karte geladen. Klicken Sie auf 'Gespeicherte Route starten' im Routenmanager, um sie zu aktivieren.`, false);
+
+            } catch (e) {
+                console.error("Fehler beim Parsen der Routenpunkte:", e);
+                showAlert('Datenfehler', 'Fehler beim Laden der Routendaten.', false);
+            }
+        };
+
+        const deleteRoute = async (routeId, routeName) => {
+             // Verhindere Klick-Propagation, um Routenauswahl zu vermeiden
+            event.stopPropagation();
+            window.confirmCallback = async () => {
+                try {
+                    await deleteDoc(doc(getRoutesCollection(), routeId));
+                    showAlert('Erfolg', `Route "${routeName}" wurde gelöscht.`, false);
+                } catch (error) {
+                    console.error("Fehler beim Löschen der Route:", error);
+                    showAlert('Fehler', 'Löschvorgang fehlgeschlagen.', false);
+                }
+            };
+            showAlert('Löschen bestätigen', `Soll die Route "${routeName}" wirklich gelöscht werden?`, true);
+        };
+
+        const searchRoutes = () => {
+            const query = document.getElementById('routeSearch').value.toLowerCase();
+            const filteredRoutes = allRoutes.filter(route =>
+                route.name.toLowerCase().includes(query)
+            );
+            renderRoutes(filteredRoutes);
+        };
+
+        window.startSelectedRoute = () => {
+            if (!selectedRouteId) {
+                showAlert('Keine Route gewählt', 'Bitte wählen Sie eine gespeicherte Route aus der Liste.', false);
+                return;
+            }
+
+            const route = allRoutes.find(r => r.id === selectedRouteId);
+            if (!route) return;
+
+            // Logik zum Starten der Überwachung entlang der Route (z.B. Benachrichtigung beim Abweichen)
+            // Hier wird vereinfacht nur die Live-Aufzeichnung gestartet und der Timer zurückgesetzt.
+            startTracking();
+            updateStatus(`Live-Tracking gestartet (Route: ${route.name})`, 'bg-green-600');
+            // Hier könnte man die Route in einen speziellen 'Active' State setzen
+            toggleRouteManager(); // Manager schließen
+        };
+
+
+        /**
+         * UI/MODAL HILFSFUNKTIONEN
+         */
+        const updateStatus = (text, bgColor) => {
+            const statusDiv = document.getElementById('statusMessage');
+            const statusText = document.getElementById('gpsStatusText');
+
+            // Setze den Hintergrund über Tailwind Klassen
+            statusDiv.className = `text-center p-2 text-sm font-medium rounded-lg smooth-transition ${bgColor}`;
+            statusText.textContent = text;
+        };
+
+        const toggleRouteManager = () => {
+            const manager = document.getElementById('routeManager');
+            const isHidden = manager.classList.contains('hidden');
+
+            if (isHidden) {
+                manager.classList.remove('hidden');
+                setTimeout(() => manager.style.opacity = '1', 10);
+                document.getElementById('showRoutesButton').classList.replace('bg-indigo-600', 'bg-red-600');
+            } else {
+                manager.style.opacity = '0';
+                setTimeout(() => manager.classList.add('hidden'), 300);
+                document.getElementById('showRoutesButton').classList.replace('bg-red-600', 'bg-indigo-600');
+            }
+        };
+
+        // Speichern Modal anzeigen
+        const showSaveModal = () => {
+            const modal = document.getElementById('saveModal');
+            const content = document.getElementById('saveModal').querySelector('.bg-gray-800');
+            document.getElementById('routeNameInput').value = '';
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            // Flüssige Animation
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        };
+
+        // Speichern Modal ausblenden
+        const hideSaveModal = () => {
+            const modal = document.getElementById('saveModal');
+            const content = document.getElementById('saveModal').querySelector('.bg-gray-800');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            // Warten, bis Animation beendet ist, bevor 'hidden' hinzugefügt wird
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        };
+
+        // Generalisiertes Alert/Confirm Modal anzeigen
+        let currentConfirmResolve;
+        const showAlert = (title, message, isConfirm) => {
+            const modal = document.getElementById('alertModal');
+            const content = document.getElementById('alertContent');
+            document.getElementById('alertTitle').textContent = title;
+            document.getElementById('alertMessage').textContent = message;
+
+            const confirmBtn = document.getElementById('alertConfirmButton');
+            if (isConfirm) {
+                confirmBtn.classList.remove('hidden');
+                // Erstelle ein Promise, das bei Bestätigung aufgelöst wird
+                return new Promise(resolve => {
+                    currentConfirmResolve = resolve;
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                    setTimeout(() => {
+                        content.classList.remove('scale-95', 'opacity-0');
+                        content.classList.add('scale-100', 'opacity-100');
+                    }, 10);
+                });
+            } else {
+                confirmBtn.classList.add('hidden');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => {
+                    content.classList.remove('scale-95', 'opacity-0');
+                    content.classList.add('scale-100', 'opacity-100');
+                }, 10);
+            }
+        };
+
+        // Generalisiertes Alert Modal ausblenden
+        window.hideAlertModal = () => {
+            const modal = document.getElementById('alertModal');
+            const content = document.getElementById('alertContent');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        };
+
+        // Bestätigungsaktion (für Löschen)
+        window.confirmAction = () => {
+            hideAlertModal();
+            if (window.confirmCallback) {
+                window.confirmCallback();
+                window.confirmCallback = null; // Callback zurücksetzen
+            }
+        };
+
+        // Starte die Initialisierung, sobald das Fenster geladen ist
+        window.onload = initFirebase;
+
+    </script>
+</body>
+</html>
